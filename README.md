@@ -28,6 +28,31 @@ It keeps the useful shape of a coding-agent terminal UI, but the tool surface is
 cargo build --release
 ```
 
+## Docker
+
+Build the image:
+
+```bash
+./docker.sh build
+```
+
+Run the CLI in Docker:
+
+```bash
+./docker.sh
+```
+
+Pass yolomancer arguments through the wrapper:
+
+```bash
+./docker.sh login --profile your-aws-profile
+./docker.sh --login --profile your-aws-profile
+./docker.sh run "inspect this repo"
+./docker.sh resume
+```
+
+The wrapper mounts the current repository at `/workspace`, maps `~/.aws` into the container, and creates/maps `~/.yolomancer` for yolomancer config and sessions.
+
 ## Configure
 
 Store AWS Bedrock credentials and verify Opus access:

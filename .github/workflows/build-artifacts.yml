@@ -1,0 +1,115 @@
+name: Build Artifacts
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.artifact_name }}
+    runs-on: ${{ matrix.os }}
+    env:
+      TARGET_RELEASE_REPO: dennisvink/yolomancer
+      BIN_NAME: yolomancer
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            artifact_name: yolomancer-darwin-arm64
+          - os: macos-15-intel
+            artifact_name: yolomancer-darwin-amd64
+          - os: ubuntu-24.04
+            artifact_name: yolomancer-linux-amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve Version From Cargo
+        shell: pwsh
+        run: |
+          if (!(Test-Path "Cargo.toml")) {
+            throw "Missing Cargo.toml"
+          }
+          $line = Get-Content "Cargo.toml" | Where-Object { $_ -match '^\s*version\s*=\s*"(\d+\.\d+\.\d+)"' } | Select-Object -First 1
+          if (-not $line) {
+            throw "Could not find semantic package version in Cargo.toml"
+          }
+          if ($line -notmatch '^\s*version\s*=\s*"(\d+\.\d+\.\d+)"') {
+            throw "Invalid semantic version in Cargo.toml"
+          }
+          $version = $Matches[1]
+          $releaseTag = "v$version"
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TARGET_RELEASE_TAG=$releaseTag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TARGET_RELEASE_NAME=$releaseTag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ARTIFACT_BASE=${{ matrix.artifact_name }}-$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ASSET_PATH=dist/${{ matrix.artifact_name }}-$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          cargo build --locked --release
+
+      - name: Pack
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "target/release/${{ env.BIN_NAME }}" "${{ env.ASSET_PATH }}"
+          chmod +x "${{ env.ASSET_PATH }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_BASE }}
+          path: ${{ env.ASSET_PATH }}
+          if-no-files-found: error
+
+      - name: Publish To Target Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+            throw "Missing required secret TARGET_REPO_TOKEN"
+          }
+          $tag = $env:TARGET_RELEASE_TAG
+          $repo = $env:TARGET_RELEASE_REPO
+          $name = $env:TARGET_RELEASE_NAME
+          $asset = $env:ASSET_PATH
+
+          $repoInfo = gh api "repos/$repo" 2>$null | ConvertFrom-Json
+          if (-not $repoInfo) {
+            throw "Cannot access target repository $repo with TARGET_REPO_TOKEN (check repo slug, repo scope, and org SSO authorization)."
+          }
+          $defaultBranch = [string]$repoInfo.default_branch
+          if ([string]::IsNullOrWhiteSpace($defaultBranch)) {
+            throw "Target repository $repo has no default branch configured."
+          }
+          gh api "repos/$repo/branches/$defaultBranch" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Target repository $repo is empty (no commits on '$defaultBranch'). Push at least one commit to $repo before publishing releases."
+          }
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $repo --target $defaultBranch --title $name --generate-notes
+            if ($LASTEXITCODE -ne 0) {
+              gh release view $tag --repo $repo *> $null
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to create or view release $tag in $repo"
+              }
+            }
+          }
+
+          gh release upload $tag $asset --repo $repo --clobber
