@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - develop
+    paths-ignore:
+      - "README.md"
+      - ".gitignore"
 
 permissions:
   contents: write
