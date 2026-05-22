@@ -22,6 +22,40 @@ It keeps the useful shape of a coding-agent terminal UI, but the tool surface is
   - `workshop_exercise`
 - Workspace Python tools from `tools/*.py`, executed by embedded RustPython.
 
+## Install
+
+### Homebrew
+
+```bash
+brew tap dennisvink/yolomancer
+brew install yolomancer
+```
+
+Upgrade later with:
+
+```bash
+brew update
+brew upgrade yolomancer
+```
+
+### Linux
+
+Download the latest release binary for your architecture:
+
+```bash
+# x86_64 / amd64
+curl -L -o yolomancer https://github.com/dennisvink/yolomancer/releases/latest/download/yolomancer-linux-amd64-0.1.6
+chmod +x yolomancer
+sudo mv yolomancer /usr/local/bin/yolomancer
+```
+
+```bash
+# arm64 / aarch64
+curl -L -o yolomancer https://github.com/dennisvink/yolomancer/releases/latest/download/yolomancer-linux-arm64-0.1.6
+chmod +x yolomancer
+sudo mv yolomancer /usr/local/bin/yolomancer
+```
+
 ## Build
 
 ```bash
