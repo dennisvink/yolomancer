@@ -50,6 +50,7 @@ const path=require('node:path'),fs=require('node:fs'),assert=require('node:asser
   await page.getByRole('tab').nth(1).click();b=await current();await b.waitForFunction(()=>document.querySelector('#status')?.textContent==='CONNECTED');assert.equal(await b.evaluate(()=>identity.privateKey),second.key);
   await page.getByRole('tab').first().click({button:'right'});await page.getByRole('menuitem',{name:'Duplicate',exact:true}).click();
   await page.waitForFunction(()=>document.querySelectorAll('[role=tab]').length===3);
+  await page.frameLocator('iframe:not([hidden])').locator('#status').filter({hasText:'CONNECTED'}).waitFor();
   const duplicate=await current();await duplicate.waitForFunction(()=>document.querySelector('#status')?.textContent==='CONNECTED');
   assert.equal(await duplicate.evaluate(()=>identity.privateKey),first.key);
   const duplicateTab=await duplicate.evaluate(()=>labTabID),order=await page.evaluate(()=>JSON.parse(localStorage.getItem('yolomancer-tabs')).tabs.map(x=>x.id));

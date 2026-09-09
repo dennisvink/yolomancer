@@ -43,6 +43,7 @@ let browser;
  const originalTask=get(created[0].id).task_arn.S;
  await page.getByRole('tab').first().click({button:'right'});await page.getByRole('menuitem',{name:'Duplicate',exact:true}).click();
  await page.waitForFunction(()=>document.querySelectorAll('[role=tab]').length===3);
+ await page.frameLocator('iframe:not([hidden])').locator('#status').filter({hasText:'CONNECTED'}).waitFor({timeout:90000});
  const third=await current();await third.waitForFunction(()=>document.querySelector('#status')?.textContent==='CONNECTED',null,{timeout:90000});assert.equal(await third.evaluate(()=>identity.privateKey),keys[0]);
  assert.equal(await third.evaluate(()=>state.id),created[0].id);
  assert.equal(get(created[0].id).task_arn.S,originalTask);
