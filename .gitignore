@@ -1,0 +1,35 @@
+# Archived local files
+attic/
+/terraform/
+
+# Go binaries and test artifacts
+/yolomancer
+/golomancer
+/bin/
+/dist/
+*.test
+/coverage.out
+/coverage.html
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local credentials and application state
+/accounts.csv
+/codes/
+.env
+.env.*
+!.env.example
+!.env.sample
+.aws/
+.yolomancer/
+
+# OS and editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
