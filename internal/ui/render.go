@@ -82,7 +82,7 @@ func (m *Model) renderView() tea.View {
 	}
 	view := tea.NewView(strings.Join(lines, "\n"))
 	view.AltScreen = m.altScreen
-	view.MouseMode = tea.MouseModeCellMotion
+	// Leave mouse events to the terminal for native text selection and copying.
 	view.WindowTitle = m.windowTitle()
 	view.BackgroundColor = c64BackgroundRGB
 	view.ForegroundColor = c64ForegroundRGB

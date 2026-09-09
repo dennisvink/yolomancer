@@ -186,21 +186,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.updateKey(x)
-	case tea.MouseWheelMsg:
-		if x.Mouse().Button == tea.MouseWheelUp {
-			m.scrollBy(-3)
-		} else if x.Mouse().Button == tea.MouseWheelDown {
-			m.scrollBy(3)
-		}
-		return m, nil
-	case tea.MouseClickMsg:
-		mouse := x.Mouse()
-		if mouse.Mod&tea.ModAlt != 0 && !m.running && mouse.Y >= m.composerScreenY && mouse.Y < m.composerScreenY+max(1, m.height-m.composerScreenY-1) && mouse.X >= 3 {
-			lines := visualLines(m.composer.Value(), m.composer.wrapWidth())
-			row := min(len(lines)-1, m.composerScroll+mouse.Y-m.composerScreenY)
-			m.composer.cursor = byteIndexAtRuneColumn(m.composer.Value(), lines[row].start, lines[row].end, max(0, mouse.X-3))
-		}
-		return m, nil
 	case deltaMsg:
 		if m.streaming < 0 {
 			m.entries = append(m.entries, model.TranscriptEntry{Kind: model.EntryAssistant, Streaming: true})

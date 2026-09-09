@@ -8,6 +8,14 @@ import (
 	"github.com/dennisvink/yolomancer/internal/model"
 )
 
+func TestViewLeavesMouseToTerminal(t *testing.T) {
+	m := newModel(app.New(&model.Config{}, false), nil)
+	m.width, m.height = 80, 24
+	if mode := m.View().MouseMode; mode != 0 {
+		t.Fatalf("mouse capture must remain disabled, got %v", mode)
+	}
+}
+
 func TestSlashPaletteSelectsPrefixMatch(t *testing.T) {
 	m := newModel(app.New(&model.Config{}, false), nil)
 	m.composer.SetValue("/perm")
