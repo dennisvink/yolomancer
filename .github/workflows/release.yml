@@ -30,6 +30,7 @@ jobs:
         run: |
           go test -race ./...
           go vet ./...
+          python3 .github/scripts/test_publish_website.py
 
   build:
     runs-on: ubuntu-latest
@@ -116,8 +117,18 @@ jobs:
           merge-multiple: true
           path: dist
       - name: Publish rolling latest release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: bash .github/scripts/publish-latest.sh
+      - name: Publish website binaries
+        if: steps.publish.outputs.published == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.WEBSITE_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.WEBSITE_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: eu-west-1
+          AWS_DEFAULT_REGION: eu-west-1
+          AWS_EC2_METADATA_DISABLED: 'true'
+        run: bash .github/scripts/publish-website.sh

@@ -48,3 +48,6 @@ fi
 # Replace only these known assets; leave unrelated release assets alone.
 gh release upload latest "${assets[@]}" --clobber
 gh release upload latest SHA256SUMS --clobber
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  echo 'published=true' >> "$GITHUB_OUTPUT"
+fi
