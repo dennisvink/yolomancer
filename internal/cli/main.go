@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/dennisvink/yolomancer/internal/app"
+	"github.com/dennisvink/yolomancer/internal/gitremote"
 	appconfig "github.com/dennisvink/yolomancer/internal/config"
 	"github.com/dennisvink/yolomancer/internal/model"
 	"github.com/dennisvink/yolomancer/internal/provider"
@@ -41,6 +42,9 @@ func Main() {
 	}
 }
 func run(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "git" {
+		return gitremote.Run(ctx, args[1:])
+	}
 	o, err := parse(args)
 	if err != nil {
 		return err
@@ -474,6 +478,7 @@ func usage(w io.Writer) {
 Usage: yolomancer [OPTIONS] [COMMAND]
 
 Commands:
+  git     Manage shared S3 Git repositories and install native Git helpers
   register Claim workshop credentials using an access code
   login   Store AWS Bedrock credentials and optional defaults in ~/.yolomancer/config.toml
   logout  Remove stored credentials from ~/.yolomancer/config.toml
