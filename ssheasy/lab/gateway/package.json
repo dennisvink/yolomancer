@@ -1,1 +1,0 @@
-{"private":true,"type":"module","scripts":{"start":"node server.mjs","test":"node --test"},"dependencies":{"@aws-crypto/sha256-js":"^5.2.0","@aws-sdk/client-dynamodb":"^3.0.0","@aws-sdk/client-ecs":"^3.0.0","@aws-sdk/credential-providers":"^3.0.0","@smithy/protocol-http":"^5.6.2","@smithy/signature-v4":"^5.7.3","ws":"^8.18.0"}}
