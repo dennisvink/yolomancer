@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -286,6 +287,9 @@ func (m *Model) transcriptBodyLines(width int) []string {
 }
 
 func (m *Model) renderTranscriptEntry(entry model.TranscriptEntry, width int) []string {
+	// Source/model/tool text is data, never terminal instructions. Normalize it
+	// before Markdown adds our own styling, and before measuring wrapped rows.
+	entry.Text = displayText(entry.Text)
 	var lines []string
 	label, style := entryPresentation(entry.Kind)
 	body := m.entryBody(entry)
@@ -301,6 +305,19 @@ func (m *Model) renderTranscriptEntry(entry model.TranscriptEntry, width int) []
 		lines = append(lines, prefix+line)
 	}
 	return lines
+}
+
+func displayText(text string) string {
+	text = strings.ReplaceAll(strings.ReplaceAll(ansi.Strip(text), "\r\n", "\n"), "\r", "\n")
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.ReplaceAll(text, "\t", "    "))
 }
 
 func entryPresentation(kind model.EntryKind) (string, lipgloss.Style) {
