@@ -1,0 +1,17 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRechtspraakVectors",
+      "Effect": "Allow",
+      "Action": ["s3vectors:QueryVectors", "s3vectors:GetVectors"],
+      "Resource": "arn:aws:s3vectors:eu-central-1:183305290766:bucket/rechtspraak-kb-vectors-183305290766-eu-central-1/index/rechtspraak-kb-rulings-v1"
+    },
+    {
+      "Sid": "ReadRechtspraakPassages",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::rechtspraakknowledgebasest-artifactsbucket2aac5544-zjjzqvsoqjo4/chunks/*"
+    }
+  ]
+}
