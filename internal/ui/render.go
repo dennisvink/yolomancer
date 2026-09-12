@@ -292,8 +292,16 @@ func (m *Model) renderTranscriptEntry(entry model.TranscriptEntry, width int) []
 	entry.Text = displayText(entry.Text)
 	var lines []string
 	label, style := entryPresentation(entry.Kind)
-	body := m.entryBody(entry)
-	bodyLines := strings.Split(ansi.Hardwrap(body, max(8, width-len(label)), true), "\n")
+	bodyWidth := max(1, width-ansi.StringWidth(label))
+	body := m.entryBody(entry, bodyWidth)
+	// Markdown already wraps paragraphs at bodyWidth. Only hard-wrap remaining
+	// overlong tokens/code rows; do not lay it out at full width then split words
+	// to make room for the label. Plain prose also prefers word boundaries.
+	wrapped := ansi.Hardwrap(body, bodyWidth, true)
+	if entry.Kind != model.EntryAssistant && entry.Kind != model.EntryTool {
+		wrapped = ansi.Wrap(body, bodyWidth, "")
+	}
+	bodyLines := strings.Split(wrapped, "\n")
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}
 	}
@@ -341,10 +349,10 @@ func entryPresentation(kind model.EntryKind) (string, lipgloss.Style) {
 	}
 }
 
-func (m *Model) entryBody(entry model.TranscriptEntry) string {
+func (m *Model) entryBody(entry model.TranscriptEntry, width int) string {
 	switch entry.Kind {
 	case model.EntryAssistant:
-		return m.renderMarkdown(entry.Text)
+		return m.renderMarkdownAtWidth(entry.Text, width)
 	case model.EntryTool:
 		return renderTool(entry.Text)
 	case model.EntryReasoning, model.EntryStatus, model.EntryDebug:

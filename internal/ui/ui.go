@@ -932,6 +932,10 @@ func (m *Model) scrollHalfPage(direction int) {
 	}
 }
 func (m *Model) renderMarkdown(text string) string {
+	return m.renderMarkdownAtWidth(text, max(1, m.width-2))
+}
+
+func (m *Model) renderMarkdownAtWidth(text string, width int) string {
 	if start := strings.Index(text, "<proposed_plan>"); start >= 0 {
 		if end := strings.Index(text, "</proposed_plan>"); end > start {
 			text = "## Proposed Plan\n\n" + strings.TrimSpace(text[start+len("<proposed_plan>"):end])
@@ -947,7 +951,7 @@ func (m *Model) renderMarkdown(text string) string {
 	markdownStyle.Document.BlockSuffix = ""
 	markdownStyle.Document.Margin = &zero
 	markdownStyle.Heading.BlockSuffix = ""
-	renderer, err := glamour.NewTermRenderer(glamour.WithColorProfile(termenv.TrueColor), glamour.WithStyles(markdownStyle), glamour.WithWordWrap(max(20, m.width-2)), glamour.WithTableWrap(true))
+	renderer, err := glamour.NewTermRenderer(glamour.WithColorProfile(termenv.TrueColor), glamour.WithStyles(markdownStyle), glamour.WithWordWrap(max(1, width)), glamour.WithTableWrap(true))
 	if err != nil {
 		return assistantStyle.Render(text)
 	}
@@ -967,12 +971,8 @@ func compactMarkdownRows(rendered string) string {
 		if strings.TrimSpace(ansi.Strip(row)) == "" {
 			continue
 		}
-		// Glamour pads every line with ANSI-colored trailing spaces to the
-		// word-wrap width. When transcriptBodyLines later applies
-		// ansi.Hardwrap at a narrower width (adjusted for the entry label),
-		// those padding spaces overflow onto a new line, producing spurious
-		// blank rows. Strip the cosmetic trailing whitespace here so that
-		// Hardwrap sees only the actual content.
+		// Discard Glamour's ANSI-colored trailing padding. Transcript rows
+		// are padded once, after wrapping and adding the entry label.
 		compact = append(compact, stripTrailingANSIPadding(row))
 	}
 	return strings.ReplaceAll(strings.Join(compact, "\n"), fencedCodeBlankMarker, "")
