@@ -32,6 +32,7 @@ var planWordRE = regexp.MustCompile(`(?i)(^|[^[:alnum:]_])plan([^[:alnum:]_]|$)`
 const fencedCodeBlankMarker = "\u2063"
 
 type Model struct {
+	pendingGoal        string
 	app                *app.App
 	program            *tea.Program
 	composer           composer
@@ -159,6 +160,7 @@ func newModel(a *app.App, s *model.SessionSnapshot) *Model {
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		tick(),
+		m.continueGoal(),
 		func() tea.Msg { return tea.RequestBackgroundColor() },
 	)
 }
@@ -167,6 +169,8 @@ func tick() tea.Cmd {
 }
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch x := msg.(type) {
+	case goalContinueMsg:
+		return m, m.startGoal(x.id)
 	case tickMsg:
 		return m, tick()
 	case tea.WindowSizeMsg:
@@ -289,6 +293,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.removeQueuedEntry(next)
 			return m, m.submit(next)
 		}
+		if x.err == nil {
+			return m, m.continueGoal()
+		}
 		return m, nil
 	}
 	return m, nil
@@ -297,6 +304,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key, stroke := message.Key(), message.Keystroke()
 	if stroke == "ctrl+c" {
+		m.pauseGoal()
 		if m.cancel != nil {
 			m.cancel()
 		}
@@ -346,6 +354,7 @@ func (m *Model) updateKey(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleApprovalKey(message)
 	}
 	if m.running && stroke == "esc" {
+		m.pauseGoal()
 		if m.cancel != nil {
 			m.cancel()
 		}
@@ -463,6 +472,10 @@ func (m *Model) submitComposer() (tea.Model, tea.Cmd) {
 	m.planNudgeDismissed = false
 	m.historyIndex, m.draft = -1, ""
 	if value == ":quit" || value == ":exit" {
+		m.pauseGoal()
+		if m.cancel != nil {
+			m.cancel()
+		}
 		m.save()
 		return m, tea.Quit
 	}
@@ -545,7 +558,7 @@ func (m *Model) slashMatches() []string {
 func (m *Model) submit(value string) tea.Cmd {
 	if strings.HasPrefix(value, "/") && knownSlashCommand(strings.Fields(value)[0]) {
 		m.slash(value)
-		return nil
+		return m.continueGoal()
 	}
 	m.history = append(m.history, value)
 	m.add(model.EntryUser, value)
@@ -554,6 +567,8 @@ func (m *Model) submit(value string) tea.Cmd {
 	m.workingStarted = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancel = cancel
+	// Establish the resumable session before a model tool can create a goal.
+	m.save()
 	return func() tea.Msg {
 		text, err := m.app.RunTurn(ctx, value, programSink{m.program})
 		return turnDoneMsg{text, err}
@@ -569,6 +584,8 @@ func (m *Model) slash(raw string) {
 		root = canonical
 	}
 	switch cmd {
+	case "/goal":
+		m.goalCommand(args)
 	case "/plan":
 		m.app.SetMode(model.ModePlan)
 		m.add(model.EntryInfo, "Switched to Plan mode.")
@@ -731,7 +748,7 @@ func copyText(value string) error {
 }
 
 func SlashCommands() []string {
-	return []string{"/allow-net", "/approvals", "/code", "/compact", "/copy", "/deny-net", "/login", "/logout", "/permissions", "/plan", "/ps", "/stop", "/trust", "/untrust", "/unapprove"}
+	return []string{"/allow-net", "/approvals", "/code", "/compact", "/copy", "/deny-net", "/goal", "/login", "/logout", "/permissions", "/plan", "/ps", "/stop", "/trust", "/untrust", "/unapprove"}
 }
 func (m *Model) permissions(root, args string) {
 	if args == "" {
@@ -1016,7 +1033,11 @@ func (m *Model) save() {
 	cwd, _ := os.Getwd()
 	m.cwdHistory = appendUnique(m.cwdHistory, cwd)
 	s := model.SessionSnapshot{Version: 1, SessionID: m.app.SessionID, UpdatedAtUnix: uint64(time.Now().Unix()), CWD: &cwd, CWDHistory: m.cwdHistory, BedrockMessages: m.app.RawMessages(), Transcript: m.entries, History: m.history, Usage: m.usage, ContextBudget: m.app.ContextBudget(), CollaborationMode: m.app.Mode}
-	_ = session.Write(&s)
+	s.Goal = m.app.Goals.Get()
+	if err := session.Write(&s); err != nil {
+		m.pauseGoal()
+		m.add(model.EntryError, "Could not save session: "+err.Error())
+	}
 }
 
 func (m *Model) historyUp() {

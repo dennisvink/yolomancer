@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appconfig "github.com/dennisvink/yolomancer/internal/config"
+	"github.com/dennisvink/yolomancer/internal/goal"
 	"github.com/dennisvink/yolomancer/internal/model"
 )
 
@@ -61,7 +62,7 @@ func Write(s *model.SessionSnapshot) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(f, b, 0600)
+	return atomicWrite(f, b)
 }
 
 func Load(id string) (*model.SessionSnapshot, error) {
@@ -83,7 +84,51 @@ func Load(id string) (*model.SessionSnapshot, error) {
 	if s.CollaborationMode == "" {
 		s.CollaborationMode = model.ModeDefault
 	}
+	// The sidecar is authoritative: model tool updates are durable even before
+	// the UI has saved its next transcript snapshot. A stored null means cleared.
+	if b, err := os.ReadFile(f + ".goal"); err == nil {
+		if err := json.Unmarshal(b, &s.Goal); err != nil {
+			return nil, fmt.Errorf("parse goal: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
 	return &s, nil
+}
+
+func WriteGoal(id string, g *goal.State) error {
+	f, err := File(id)
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(g)
+	if err != nil {
+		return err
+	}
+	return atomicWrite(f+".goal", b)
+}
+
+func atomicWrite(path string, b []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".session-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }
 
 type Summary struct {

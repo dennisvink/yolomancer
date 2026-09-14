@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/dennisvink/yolomancer/internal/goal"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,7 +33,8 @@ func TestAutomaticCompactionAcrossToolLoopAndResume(t *testing.T) {
 			}
 			cfg := &model.Config{}
 			sink := &recordingSink{}
-			executor := &tools.Executor{Config: cfg, Policy: security.BuildPolicy(cfg, root), Processes: process.New()}
+			goals := goal.New(&goal.State{ID: "persistent", Objective: "Complete the entire objective", Status: goal.Active, TokensUsed: 99}, nil)
+			executor := &tools.Executor{Goals: goals, Config: cfg, Policy: security.BuildPolicy(cfg, root), Processes: process.New()}
 			budget := &model.ContextBudget{}
 			if trigger == "preflight" {
 				budget.KnownTokens = provider.AutoCompactTokens
@@ -58,6 +60,9 @@ func TestAutomaticCompactionAcrossToolLoopAndResume(t *testing.T) {
 					return map[string]any{"output": map[string]any{"message": map[string]any{"role": "assistant", "content": []any{map[string]any{"toolUse": map[string]any{"toolUseId": "read-compact", "name": "read_file", "input": map[string]any{"path": path, "reason": "inspect"}}}}}}, "usage": map[string]any{"inputTokens": 899999, "outputTokens": 100}}, nil
 				}
 				raw, _ := json.Marshal(messages)
+				if !strings.Contains(string(raw), "Complete the entire objective") || goals.Get().TokensUsed != 99 {
+					t.Fatal("compaction lost goal or reset goal accounting")
+				}
 				if !strings.Contains(string(raw), "Context checkpoint") || strings.Contains(string(raw), "old history") {
 					t.Fatal("old context survived compaction")
 				}

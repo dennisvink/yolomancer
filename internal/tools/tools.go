@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	appconfig "github.com/dennisvink/yolomancer/internal/config"
+	"github.com/dennisvink/yolomancer/internal/goal"
 	"github.com/dennisvink/yolomancer/internal/model"
 	proc "github.com/dennisvink/yolomancer/internal/process"
 	"github.com/dennisvink/yolomancer/internal/provider"
@@ -42,6 +43,7 @@ const (
 type Approver func(context.Context, ApprovalRequest) (ApprovalDecision, error)
 
 type Executor struct {
+	Goals      *goal.Manager
 	Config     *model.Config
 	Policy     security.Policy
 	Mode       model.CollaborationMode
@@ -106,10 +108,18 @@ func Specs(mode model.CollaborationMode, cfg *model.Config) []map[string]any {
 		}
 		out = append(out, map[string]any{"type": "function", "name": d.Name, "description": d.Description, "parameters": p})
 	}
-	return out
+	return append(out, goalSpecs()...)
 }
 
 func (e *Executor) Execute(ctx context.Context, call model.ToolCall) string {
+	if e.Goals != nil {
+		if err := e.Goals.Err(); err != nil {
+			return fail(err.Error())
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return fail(err.Error())
+	}
 	args := cloneMap(call.Arguments)
 	delete(args, "reason")
 	if e.Mode == model.ModePlan {
@@ -125,6 +135,8 @@ func (e *Executor) Execute(ctx context.Context, call model.ToolCall) string {
 	var value string
 	var err error
 	switch call.Name {
+	case "get_goal", "create_goal", "update_goal":
+		value, err = e.goalTool(call.Name, args)
 	case "exec_command":
 		value, err = e.exec(ctx, args)
 	case "write_stdin":
@@ -146,6 +158,9 @@ func (e *Executor) Execute(ctx context.Context, call model.ToolCall) string {
 	}
 	if err != nil {
 		return provider.BoundToolOutput(toolFailure(call, err.Error()))
+	}
+	if e.Goals != nil {
+		e.Goals.RecordToolOutcome(true, false)
 	}
 	return provider.BoundToolOutput(value)
 }
@@ -272,6 +287,9 @@ func (e *Executor) exec(ctx context.Context, a map[string]any) (string, error) {
 		login = false
 	}
 	result, err := e.Processes.Exec(ctx, proc.ExecOptions{Env: provider.ToolEnvironment(e.Config), Command: cmd, DisplayCommand: originalCommand, Workdir: resolved, Shell: shell, Login: login, TTY: tty, Yield: yield, MaxTokens: max})
+	if err != nil && ctx.Err() == nil && e.Goals != nil {
+		e.Goals.RecordToolOutcome(false, true)
+	}
 	if err != nil {
 		return "", err
 	}

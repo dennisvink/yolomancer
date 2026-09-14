@@ -101,7 +101,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		a := app.New(cfg, debug)
 		sink := stdoutSink{debug: debug}
-		_, err = a.RunTurn(ctx, o.args[0], sink)
+		_, err = a.Run(ctx, o.args[0], sink)
 		return err
 	case "resume":
 		return resume(ctx, o, base, debug)

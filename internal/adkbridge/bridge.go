@@ -104,6 +104,9 @@ func runSegment(ctx context.Context, prompt string, cfg Config) (string, []any, 
 	if llm == nil {
 		llm = &bedrockLLM{bedrock: &provider.Bedrock{Config: cfg.ModelConfig, Client: &http.Client{}}, mode: cfg.Mode, state: state, budget: cfg.Budget}
 	}
+	if cfg.Executor.Goals != nil {
+		llm = &goalLLM{LLM: llm, goals: cfg.Executor.Goals}
+	}
 	adkTools, err := buildTools(yolotools.Specs(cfg.Mode, cfg.ModelConfig), state)
 	if err != nil {
 		return "", cfg.Messages, err

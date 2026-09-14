@@ -20,6 +20,7 @@ type slashCommandDef struct {
 }
 
 var slashCommandDefs = []slashCommandDef{
+	{"/goal", "Set a persistent objective, optionally /goal --budget <tokens> <objective>. /goal shows status. Controls: edit, pause, resume, clear, budget <tokens|none>."},
 	{"/allow-net", "Remember an allowed network rule, e.g. `/allow-net https://api.example.com` or `/allow-net https://*.example.com`."},
 	{"/approvals", "List remembered shell and network approval rules."},
 	{"/code", "Switch back to Default implementation mode."},
@@ -113,6 +114,13 @@ func (m *Model) statusLine() string {
 		state = frames[int(time.Now().UnixMilli()/100)%len(frames)] + " thinking"
 	}
 	line := fmt.Sprintf("%s  mode=%s  model=Opus", state, m.app.Mode)
+	if g := m.app.Goals.Get(); g != nil {
+		line += fmt.Sprintf("  goal=%s (%d", g.Status, g.TokensUsed)
+		if g.TokenBudget > 0 {
+			line += fmt.Sprintf("/%d", g.TokenBudget)
+		}
+		line += ")"
+	}
 	if m.usage != nil {
 		line += fmt.Sprintf("  tokens in=%d out=%d", m.usage.InputTokens, m.usage.OutputTokens)
 		if m.usage.CacheReadInputTokens > 0 {

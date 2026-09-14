@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/dennisvink/yolomancer/internal/goal"
 )
 
 const (
@@ -117,6 +118,7 @@ type Usage struct {
 }
 
 type SessionSnapshot struct {
+	Goal              *goal.State       `json:"goal,omitempty"`
 	Version           int               `json:"version"`
 	SessionID         string            `json:"session_id"`
 	UpdatedAtUnix     uint64            `json:"updated_at_unix"`

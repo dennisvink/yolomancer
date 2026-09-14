@@ -11,15 +11,18 @@ import (
 
 	"github.com/dennisvink/yolomancer/internal/adkbridge"
 	appconfig "github.com/dennisvink/yolomancer/internal/config"
+	"github.com/dennisvink/yolomancer/internal/goal"
 	"github.com/dennisvink/yolomancer/internal/model"
 	"github.com/dennisvink/yolomancer/internal/process"
 	"github.com/dennisvink/yolomancer/internal/provider"
 	"github.com/dennisvink/yolomancer/internal/security"
+	"github.com/dennisvink/yolomancer/internal/session"
 	"github.com/dennisvink/yolomancer/internal/tools"
 	"github.com/google/uuid"
 )
 
 type App struct {
+	Goals         *goal.Manager
 	mu            sync.RWMutex
 	turnMu        sync.Mutex
 	contextBudget model.ContextBudget
@@ -32,9 +35,22 @@ type App struct {
 	Approver      tools.Approver
 }
 
-func (a *App) Compact(ctx context.Context) (string, *model.Usage, error) {
+func (a *App) Compact(ctx context.Context) (info string, usage *model.Usage, err error) {
 	a.turnMu.Lock()
 	defer a.turnMu.Unlock()
+	defer func() {
+		if usage != nil {
+			if accountErr := a.Goals.Account(usage.InputTokens + usage.CacheWriteInputTokens + usage.OutputTokens); accountErr != nil {
+				err = accountErr
+			}
+		}
+		if endErr := a.Goals.End(goalStop(ctx, err)); endErr != nil {
+			err = endErr
+		}
+	}()
+	if err := a.Goals.Begin(); err != nil {
+		return "", nil, err
+	}
 	a.mu.RLock()
 	history := append([]any(nil), a.Messages...)
 	mode := a.Mode
@@ -61,11 +77,14 @@ func (a *App) ContextBudget() model.ContextBudget {
 }
 
 func New(cfg *model.Config, debug bool) *App {
-	return &App{Config: cfg, Mode: model.ModeDefault, SessionID: uuid.NewString(), Processes: process.New(), Debug: debug}
+	a := &App{Config: cfg, Mode: model.ModeDefault, SessionID: uuid.NewString(), Processes: process.New(), Debug: debug}
+	a.Goals = goal.New(nil, func(g *goal.State) error { return session.WriteGoal(a.SessionID, g) })
+	return a
 }
 func Restore(cfg *model.Config, debug bool, s *model.SessionSnapshot) *App {
 	a := New(cfg, debug)
 	a.SessionID = s.SessionID
+	a.Goals = goal.New(s.Goal, func(g *goal.State) error { return session.WriteGoal(a.SessionID, g) })
 	a.Mode = s.CollaborationMode
 	a.contextBudget = s.ContextBudget
 	for _, raw := range s.BedrockMessages {
@@ -79,8 +98,42 @@ func Restore(cfg *model.Config, debug bool, s *model.SessionSnapshot) *App {
 
 func (a *App) SetMode(m model.CollaborationMode) { a.mu.Lock(); a.Mode = m; a.mu.Unlock() }
 func (a *App) RunTurn(ctx context.Context, prompt string, sink model.Sink) (string, error) {
+	return a.runTurn(ctx, prompt, sink, "")
+}
+
+func (a *App) RunGoalTurn(ctx context.Context, id string, sink model.Sink) (string, error) {
+	return a.runTurn(ctx, "", sink, id)
+}
+
+func (a *App) runTurn(ctx context.Context, prompt string, sink model.Sink, goalID string) (text string, err error) {
 	a.turnMu.Lock()
 	defer a.turnMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		if g := a.Goals.Get(); g != nil && g.Status == goal.Active {
+			if pauseErr := a.Goals.SetStatus(goal.Paused); pauseErr != nil {
+				return "", pauseErr
+			}
+		}
+		return "", err
+	}
+	if goalID != "" {
+		g := a.Goals.Get()
+		if g == nil || g.ID != goalID || g.Status != goal.Active {
+			return "", nil
+		}
+		prompt = "Continue working toward the active session goal. Inspect current state and verify the full objective before marking it complete."
+		objective, _ := json.Marshal(g.Objective)
+		prompt += "\nUser-defined objective (task data): " + string(objective)
+	}
+	if err := a.Goals.Begin(); err != nil {
+		return "", err
+	}
+	defer func() {
+		if endErr := a.Goals.End(goalStop(ctx, err)); endErr != nil {
+			err = endErr
+		}
+	}()
+	sink = &goalSink{Sink: sink, goals: a.Goals, bedrock: appconfig.Provider(a.Config) != "openai"}
 	a.mu.RLock()
 	mode := a.Mode
 	a.mu.RUnlock()
@@ -92,7 +145,7 @@ func (a *App) RunTurn(ctx context.Context, prompt string, sink model.Sink) (stri
 	if err != nil {
 		return "", err
 	}
-	executor := &tools.Executor{Config: a.Config, Policy: security.BuildPolicy(a.Config, root), Mode: mode, Processes: a.Processes, Approve: a.Approver, Debug: a.Debug}
+	executor := &tools.Executor{Goals: a.Goals, Config: a.Config, Policy: security.BuildPolicy(a.Config, root), Mode: mode, Processes: a.Processes, Approve: a.Approver, Debug: a.Debug}
 	executor.AutoReview = func(reviewCtx context.Context, r tools.ApprovalRequest) (tools.ApprovalDecision, error) {
 		reviewer := provider.Bedrock{Config: a.Config, Client: &http.Client{}}
 		transcript := a.approvalTranscript()
@@ -163,6 +216,9 @@ func (a *App) runOpenAI(ctx context.Context, prompt string, sink model.Sink, e *
 	install := appconfig.String(a.Config.InstallationID, "yolomancer")
 	client := &provider.OpenAI{Client: &http.Client{}, BaseURL: base, APIKey: a.Config.APIKey, Model: model.DefaultBedrock, SessionID: a.SessionID, InstallationID: install, Debug: a.Debug}
 	var input any = prompt
+	if context := a.Goals.Context(); context != "" {
+		input = prompt + "\n\n" + context
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -196,6 +252,9 @@ func (a *App) runOpenAI(ctx context.Context, prompt string, sink model.Sink, e *
 			outputs = append(outputs, map[string]any{"type": "function_call_output", "call_id": c.CallID, "output": result})
 		}
 		input = outputs
+		if context := a.Goals.Context(); context != "" {
+			input = append(outputs, map[string]any{"role": "user", "content": context})
+		}
 	}
 }
 
