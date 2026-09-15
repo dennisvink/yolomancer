@@ -60,8 +60,8 @@ func TestBedrockConverseSignsCompatibleRequest(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
-		if body["toolConfig"] == nil || body["system"] == nil {
-			t.Errorf("missing Bedrock fields: %#v", body)
+		if body["toolConfig"] != nil || body["system"] == nil {
+			t.Errorf("tool-free requests must omit toolConfig and retain system: %#v", body)
 		}
 		response := `{"output":{"message":{"role":"assistant","content":[{"text":"ok"}]}},"usage":{"inputTokens":1,"outputTokens":1}}`
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(response)), Request: r}, nil

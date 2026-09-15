@@ -33,6 +33,8 @@ type App struct {
 	Processes     *process.Manager
 	Debug         bool
 	Approver      tools.Approver
+	// The API injects a fully configured executor; CLI behavior remains unchanged.
+	Executor *tools.Executor
 }
 
 func (a *App) Compact(ctx context.Context) (info string, usage *model.Usage, err error) {
@@ -162,7 +164,15 @@ func (a *App) runTurn(ctx context.Context, prompt string, sink model.Sink, goalI
 		}
 		return tools.Deny, nil
 	}
-	specs := tools.Specs(mode, a.Config)
+	var specs []map[string]any
+	if a.Executor != nil {
+		executor = a.Executor
+		executor.Goals = a.Goals
+		executor.Processes = a.Processes
+		specs = executor.ToolSpecs
+	} else {
+		specs = tools.Specs(mode, a.Config)
+	}
 	if appconfig.Provider(a.Config) == "openai" {
 		return a.runOpenAI(ctx, prompt, sink, executor, specs)
 	}
@@ -250,6 +260,9 @@ func (a *App) runOpenAI(ctx context.Context, prompt string, sink model.Sink, e *
 			result := e.Execute(ctx, c)
 			sink.ToolResult(c, result)
 			outputs = append(outputs, map[string]any{"type": "function_call_output", "call_id": c.CallID, "output": result})
+			if e.PermissionError != nil {
+				return "", e.PermissionError
+			}
 		}
 		input = outputs
 		if context := a.Goals.Context(); context != "" {

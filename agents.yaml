@@ -1,0 +1,36 @@
+version: 1
+
+server:
+  host: 127.0.0.1
+  port: 8081
+  max_concurrent: 1
+  # Required when binding to 0.0.0.0 or any other non-loopback address.
+  # Set a random token of at least 32 characters in the service environment:
+  # bearer_token_env: YOLOMANCER_API_TOKEN
+  # Alternatively: bearer_token: "your-secret-token-at-least-32-characters"
+
+agents:
+  workshop:
+    workspace: .
+    tools:
+      builtin:
+        - exec_command
+        - write_stdin
+        - read_file
+        - write_file
+        - replace_in_file
+        - list_files
+        - aws_cli
+      python:
+        - tools/image_metadata.py
+        - tools/case_law_search.py
+        - tools/board.py
+    permissions:
+      # Trusted lab agent: runs with the participant's OS and AWS permissions.
+      # This includes sudo in the lab. Do not expose to untrusted callers.
+      mode: yolo
+      approval: deny
+      network: allow
+    limits:
+      timeout_seconds: 900
+      token_budget: 500000

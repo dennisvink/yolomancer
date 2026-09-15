@@ -27,8 +27,9 @@ import (
 )
 
 type Bedrock struct {
-	Config *model.Config
-	Client *http.Client
+	Config      *model.Config
+	Client      *http.Client
+	ExtraSystem string
 }
 
 func (b *Bedrock) Converse(ctx context.Context, messages []any, mode model.CollaborationMode, specs []map[string]any) (map[string]any, error) {
@@ -41,7 +42,15 @@ func (b *Bedrock) converseBody(messages []any, mode model.CollaborationMode, spe
 	for _, t := range specs {
 		toolSpecs = append(toolSpecs, map[string]any{"toolSpec": map[string]any{"name": t["name"], "description": t["description"], "inputSchema": map[string]any{"json": cleanSchema(t["parameters"])}}})
 	}
-	return map[string]any{"messages": wireMessages(RepairToolResults(messages, nil)), "system": SystemPrompt(mode), "inferenceConfig": map[string]any{"maxTokens": model.BedrockMaxTokens}, "toolConfig": map[string]any{"tools": toolSpecs}, "additionalModelRequestFields": map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": model.BedrockThinkBudget}}}
+	system := SystemPrompt(mode)
+	if b.ExtraSystem != "" {
+		system = append(system, map[string]any{"text": b.ExtraSystem})
+	}
+	body := map[string]any{"messages": wireMessages(RepairToolResults(messages, nil)), "system": system, "inferenceConfig": map[string]any{"maxTokens": model.BedrockMaxTokens}, "additionalModelRequestFields": map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": model.BedrockThinkBudget}}}
+	if len(toolSpecs) > 0 {
+		body["toolConfig"] = map[string]any{"tools": toolSpecs}
+	}
+	return body
 }
 
 func (b *Bedrock) ConverseStream(ctx context.Context, messages []any, mode model.CollaborationMode, specs []map[string]any, onText, onReasoning func(string)) (map[string]any, error) {

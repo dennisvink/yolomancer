@@ -42,6 +42,12 @@ func Main() {
 	}
 }
 func run(ctx context.Context, args []string) error {
+	if len(args) > 0 && args[0] == "serve" {
+		return serve(ctx, args[1:])
+	}
+	if len(args) > 0 && args[0] == "internal-api-worker" {
+		return apiWorker(ctx)
+	}
 	if len(args) > 0 && args[0] == "board" {
 		return gitremote.RunBoard(ctx, args[1:])
 	}
@@ -185,7 +191,7 @@ func parse(args []string) (options, error) {
 	return o, nil
 }
 func isCommand(v string) bool {
-	return v == "register" || v == "login" || v == "logout" || v == "run" || v == "resume" || v == "help" || v == "internal-aws-request"
+	return v == "serve" || v == "register" || v == "login" || v == "logout" || v == "run" || v == "resume" || v == "help" || v == "internal-aws-request"
 }
 
 func loadConfig(ctx context.Context, o options) (*model.Config, error) {
@@ -481,6 +487,7 @@ func usage(w io.Writer) {
 Usage: yolomancer [OPTIONS] [COMMAND]
 
 Commands:
+  serve     Run the agent API service (agents.yaml)
   git     Manage shared S3 Git repositories and install native Git helpers
   board   Manage shared stories, comments, assignments and transitions
   register Claim workshop credentials using an access code
@@ -536,6 +543,8 @@ Options:
 		fmt.Fprintln(w, "Remove stored credentials from ~/.yolomancer/config.toml\n\nUsage: yolomancer logout [OPTIONS]\n\nOptions:\n      --profile <PROFILE>\n      --debug\n      --base-url <BASE_URL>\n      --local\n      --no-alt-screen\n      --alt-screen\n  -h, --help  Print help")
 	case "run":
 		fmt.Fprintln(w, "Run a one-shot prompt\n\nUsage: yolomancer run [OPTIONS] <PROMPT>\n\nArguments:\n  <PROMPT>\n\nOptions:\n      --profile <PROFILE>\n      --debug\n      --base-url <BASE_URL>\n      --local\n      --no-alt-screen\n      --alt-screen\n  -h, --help  Print help")
+	case "serve":
+		fmt.Fprintln(w, "Run the standalone agent API service\n\nUsage: yolomancer serve [--config agents.yaml] [--host 127.0.0.1] [--port 8081] [--profile PROFILE] [--check]\n\nNon-loopback binding requires a configured bearer token. See documentation/api.md.")
 	case "resume":
 		fmt.Fprintln(w, "Resume a saved interactive session\n\nUsage: yolomancer resume [OPTIONS] [SESSION_ID]\n\nArguments:\n  [SESSION_ID]  Session id. If omitted, choose from sessions for the current workspace\n\nOptions:\n      --profile <PROFILE>\n      --all                  Show sessions from all workspaces when choosing interactively\n      --debug\n      --base-url <BASE_URL>\n      --local\n      --no-alt-screen\n      --alt-screen\n  -h, --help  Print help")
 	default:

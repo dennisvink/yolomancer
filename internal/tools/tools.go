@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -43,17 +44,28 @@ const (
 type Approver func(context.Context, ApprovalRequest) (ApprovalDecision, error)
 
 type Executor struct {
-	Goals      *goal.Manager
-	Config     *model.Config
-	Policy     security.Policy
-	Mode       model.CollaborationMode
-	Processes  *proc.Manager
-	Approve    Approver
-	AutoReview Approver
-	Debug      bool
+	// Explicit runtime registration is independent of cwd discovery and CLI policy.
+	Headless        bool
+	AllowedTools    map[string]bool
+	PythonTools     []PythonDefinition
+	ToolSpecs       []map[string]any
+	PermissionError error
+	Goals           *goal.Manager
+	Config          *model.Config
+	Policy          security.Policy
+	Mode            model.CollaborationMode
+	Processes       *proc.Manager
+	Approve         Approver
+	AutoReview      Approver
+	Debug           bool
 }
 
 func Specs(mode model.CollaborationMode, cfg *model.Config) []map[string]any {
+	defs, _ := DiscoverPythonTools()
+	return SpecsWithPython(mode, cfg, defs)
+}
+
+func SpecsWithPython(mode model.CollaborationMode, cfg *model.Config, defs []PythonDefinition) []map[string]any {
 	reason := map[string]any{"type": "string", "description": "A short narration of what the agent is about to do with this tool call."}
 	spec := func(name, desc string, props map[string]any, required ...string) map[string]any {
 		props["reason"] = reason
@@ -82,7 +94,6 @@ func Specs(mode model.CollaborationMode, cfg *model.Config) []map[string]any {
 		}
 		out = filtered
 	}
-	defs, _ := DiscoverPythonTools()
 	for _, d := range defs {
 		p := cloneMap(d.Parameters)
 		props, _ := p["properties"].(map[string]any)
@@ -112,6 +123,23 @@ func Specs(mode model.CollaborationMode, cfg *model.Config) []map[string]any {
 }
 
 func (e *Executor) Execute(ctx context.Context, call model.ToolCall) string {
+	if e.Headless {
+		if e.PermissionError != nil {
+			return fail(e.PermissionError.Error())
+		}
+		if !e.AllowedTools[call.Name] {
+			return e.denied(call.Name, "tool is not allowed for this agent")
+		}
+		if call.Name == "exec_command" && boolean(call.Arguments, "tty", false) {
+			return e.denied(call.Name, "API commands must use tty=false")
+		}
+		if e.Policy.PermissionMode != security.PermissionYolo && (call.Name == "exec_command" || call.Name == "write_stdin" || e.isPython(call.Name)) {
+			return e.denied(call.Name, "shell and Python tools require yolo mode; application path checks cannot sandbox arbitrary code")
+		}
+		if call.Name == "aws_cli" && e.Policy.NetworkPolicy != "allow" {
+			return e.denied(call.Name, "AWS tool network access is denied")
+		}
+	}
 	if e.Goals != nil {
 		if err := e.Goals.Err(); err != nil {
 			return fail(err.Error())
@@ -157,6 +185,10 @@ func (e *Executor) Execute(ctx context.Context, call model.ToolCall) string {
 		value, err = e.python(ctx, call.Name, args)
 	}
 	if err != nil {
+		var denied *PermissionDenied
+		if e.Headless && errors.As(err, &denied) {
+			return e.denied(call.Name, denied.Message)
+		}
 		return provider.BoundToolOutput(toolFailure(call, err.Error()))
 	}
 	if e.Goals != nil {
@@ -347,6 +379,9 @@ func (e *Executor) resolvePath(ctx context.Context, raw string, write bool) (str
 	resolved, err := security.EnsureAllowed(candidate, e.Policy, write)
 	if err == nil {
 		return resolved, nil
+	}
+	if e.Headless {
+		return "", &PermissionDenied{Message: err.Error()}
 	}
 	if !strings.Contains(err.Error(), "outside the allowed workspace roots") || (e.Approve == nil && e.AutoReview == nil) {
 		return "", err
@@ -629,7 +664,14 @@ func pythonMetadata(path string) (*PythonDefinition, error) {
 	script := `import ast,json,sys
 s=open(sys.argv[1],encoding='utf-8').read(); m=ast.parse(s); f=next((x for x in m.body if isinstance(x,ast.FunctionDef) and x.name=='yolomancer_tool'),None)
 if f is None: sys.exit(3)
-ns={}; exec(compile(ast.Module(body=[f],type_ignores=[]),sys.argv[1],'exec'),ns); print(json.dumps(ns['yolomancer_tool']()))`
+ns={}
+for node in m.body:
+    if isinstance(node,ast.Assign):
+        try: value=ast.literal_eval(node.value)
+        except (ValueError,TypeError): continue
+        for target in node.targets:
+            if isinstance(target,ast.Name): ns[target.id]=value
+exec(compile(ast.Module(body=[f],type_ignores=[]),sys.argv[1],'exec'),ns); print(json.dumps(ns['yolomancer_tool']()))`
 	o, err := exec.Command(py, "-I", "-c", script, path).Output()
 	if x, ok := err.(*exec.ExitError); ok && x.ExitCode() == 3 {
 		return nil, nil
@@ -674,9 +716,13 @@ func validLocalToolName(name string) bool {
 	return true
 }
 func (e *Executor) python(ctx context.Context, name string, a map[string]any) (string, error) {
-	defs, err := DiscoverPythonTools()
-	if err != nil {
-		return "", err
+	defs := e.PythonTools
+	if !e.Headless {
+		var err error
+		defs, err = DiscoverPythonTools()
+		if err != nil {
+			return "", err
+		}
 	}
 	var d *PythonDefinition
 	for i := range defs {
@@ -908,12 +954,18 @@ func (e *Executor) awsCLI(ctx context.Context, a map[string]any) (string, error)
 		args = append(args, s)
 	}
 	if reason := awsCLIArgsDenialReason(args); reason != "" {
+		if e.Headless {
+			return "", &PermissionDenied{Message: reason}
+		}
 		return "", fmt.Errorf("%s", reason)
 	}
 	if err := e.validateAWSCLIFilesystemArgs(args); err != nil {
+		if e.Headless {
+			return "", &PermissionDenied{Message: err.Error()}
+		}
 		return "", err
 	}
-	if e.Policy.PermissionMode != security.PermissionYolo {
+	if !e.Headless && e.Policy.PermissionMode != security.PermissionYolo {
 		if e.AutoReview == nil {
 			return "", fmt.Errorf("aws_cli requires internal automatic arbitration")
 		}

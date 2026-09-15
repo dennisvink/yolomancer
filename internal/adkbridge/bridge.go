@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	appName   = "yolomancer"
-	userID    = "local"
-	agentName = "yolomancer"
+	appName             = "yolomancer"
+	userID              = "local"
+	agentName           = "yolomancer"
+	headlessInstruction = "This is a non-interactive API request. Never request human approval or wait for user input. Use only the registered tools and configured permissions. Permission denial is terminal; do not bypass it through another tool. Return a useful final answer within this run. Do not start detached or persistent processes: subprocesses are scoped to the request."
 )
 
 // Config contains one ADK turn's dependencies and retained Bedrock history.
@@ -102,16 +103,27 @@ func runSegment(ctx context.Context, prompt string, cfg Config) (string, []any, 
 	state := &turnState{sink: cfg.Sink, executor: cfg.Executor, malformed: map[string]int{}, results: map[string]map[string]any{}, cancel: cancel}
 	llm := cfg.llm
 	if llm == nil {
-		llm = &bedrockLLM{bedrock: &provider.Bedrock{Config: cfg.ModelConfig, Client: &http.Client{}}, mode: cfg.Mode, state: state, budget: cfg.Budget}
+		transport := &provider.Bedrock{Config: cfg.ModelConfig, Client: &http.Client{}}
+		if cfg.Executor.Headless {
+			transport.ExtraSystem = headlessInstruction
+		}
+		llm = &bedrockLLM{bedrock: transport, mode: cfg.Mode, state: state, budget: cfg.Budget}
 	}
 	if cfg.Executor.Goals != nil {
 		llm = &goalLLM{LLM: llm, goals: cfg.Executor.Goals}
 	}
-	adkTools, err := buildTools(yolotools.Specs(cfg.Mode, cfg.ModelConfig), state)
+	specs := cfg.Executor.ToolSpecs
+	if !cfg.Executor.Headless {
+		specs = yolotools.Specs(cfg.Mode, cfg.ModelConfig)
+	}
+	adkTools, err := buildTools(specs, state)
 	if err != nil {
 		return "", cfg.Messages, err
 	}
 	instruction := systemInstruction(cfg.Mode)
+	if cfg.Executor.Headless {
+		instruction += "\n" + headlessInstruction
+	}
 	root, err := llmagent.New(llmagent.Config{
 		Name:                agentName,
 		Description:         "Agentic coding assistant for the local terminal and workspace.",
@@ -156,6 +168,15 @@ func runSegment(ctx context.Context, prompt string, cfg Config) (string, []any, 
 			if part != nil && part.FunctionCall != nil {
 				call := model.ToolCall{CallID: part.FunctionCall.ID, Name: part.FunctionCall.Name, Arguments: part.FunctionCall.Args}
 				cfg.Sink.ToolCall(call)
+				if cfg.Executor.Headless && !cfg.Executor.AllowedTools[call.Name] {
+					result := cfg.Executor.Execute(ctx, call)
+					state.mu.Lock()
+					state.results[call.CallID] = resultObject(result)
+					state.fatal = cfg.Executor.PermissionError
+					state.mu.Unlock()
+					cfg.Sink.ToolResult(call, result)
+					cancel()
+				}
 			}
 		}
 		state.mu.Lock()
@@ -248,6 +269,12 @@ func buildTools(specs []map[string]any, state *turnState) ([]tool.Tool, error) {
 			state.results[call.CallID] = parsed
 			state.mu.Unlock()
 			state.sink.ToolResult(call, result)
+			if state.executor.PermissionError != nil {
+				state.mu.Lock()
+				state.fatal = state.executor.PermissionError
+				state.mu.Unlock()
+				state.cancel()
+			}
 			if strings.Contains(result, "missing required string argument") {
 				key := call.Name + ":" + result
 				state.mu.Lock()
