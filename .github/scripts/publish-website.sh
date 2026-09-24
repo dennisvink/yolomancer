@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Use this run's exact release artifacts, not a second fetch of the mutable tag.
 cd "${1:-dist}"
-bucket=yolomancer-website-183305290766
+bucket=yolomancer-website-379739720777
 assets=(yolomancer-darwin-amd64 yolomancer-darwin-arm64 yolomancer-linux-amd64 yolomancer-linux-arm64 yolomancer-windows-amd64.exe yolomancer-windows-arm64.exe)
 for asset in "${assets[@]}"; do
   test -s "$asset"
@@ -22,7 +22,7 @@ for platform in darwin linux windows; do
     checksum="$(openssl dgst -sha256 -binary "$asset" | openssl base64 -A)"
     aws s3api put-object --bucket "$bucket" \
       --key "downloads/$platform/$arch/$filename" --body "$asset" \
-      --expected-bucket-owner 183305290766 \
+      --expected-bucket-owner 379739720777 \
       --content-type application/octet-stream \
       --content-disposition "attachment; filename=\"$filename\"" \
       --cache-control 'no-store, no-cache, max-age=0, must-revalidate' \

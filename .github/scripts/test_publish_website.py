@@ -36,7 +36,8 @@ class WebsitePublisherTest(unittest.TestCase):
             for call in calls:
                 self.assertEqual(call[:2], ["s3api", "put-object"])
                 args = dict(zip(call[2:-1:2], call[3:-1:2]))
-                self.assertEqual(args["--bucket"], "yolomancer-website-183305290766")
+                self.assertEqual(args["--bucket"], "yolomancer-website-379739720777")
+                self.assertEqual(args["--expected-bucket-owner"], "379739720777")
                 filename = "yolomancer.exe" if "/windows/" in args["--key"] else "yolomancer"
                 self.assertTrue(args["--key"].endswith("/" + filename))
                 self.assertEqual(args["--content-disposition"], f'attachment; filename="{filename}"')
